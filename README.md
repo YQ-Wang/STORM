@@ -1,11 +1,22 @@
-# STORM
+# STORM-OMICS
 
 ## A Principled Statistical Framework for Analyzing Spatial Patterns in Spatially Resolved Multi-Omics
 
-STORM identifies spatially variable features (SVFs), quantifies spatial
-dependency with interpretable effect sizes, compares spatial patterns across
-biological conditions, and supports power and sample-size calculations for
-single-sample and multi-sample spatial studies.
+STORM is a principled statistical method for identifying, quantifying, and
+comparing spatial patterns in spatially resolved multi-omics data. Unlike
+conventional approaches that focus solely on statistical significance, STORM
+provides a unified framework for:
+
+- Identifying spatially variable features (SVFs)
+- Quantifying the magnitude of spatial dependency through interpretable
+  effect sizes
+- Comparing spatial patterns across biological conditions
+- Performing statistical power analysis and sample size determination for
+  spatial studies
+
+The framework is designed to support both single-sample and multi-sample
+analyses, enabling rigorous statistical inference in modern spatial
+transcriptomics and spatial multi-omics experiments.
 
 This repository provides a standalone Python package equivalent to
 [CastleLi/STORM](https://github.com/CastleLi/STORM).
@@ -248,13 +259,6 @@ analyses in its
 [`Reproduction`](https://github.com/CastleLi/STORM/tree/main/Reproduction)
 directory. Those R and manuscript-specific scripts are not duplicated in this
 Python distribution.
-
-## Release Process
-
-Git tags beginning with `v` build and publish both wheel and source
-distributions through PyPI Trusted Publishing. Configure the GitHub `pypi`
-environment and a pending publisher for `storm-omics` before the first
-release.
 
 ## License
 
