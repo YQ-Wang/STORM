@@ -31,17 +31,6 @@ This repository provides a standalone Python package equivalent to
 - Treatment-versus-control and treatment-versus-treatment comparisons
 - Power analysis for all three tests
 
-The Python API maps all six upstream functions:
-
-| Python | CastleLi/STORM | Purpose |
-| --- | --- | --- |
-| `storm` | `storm` | Detect and quantify spatial patterns |
-| `stormtrt` | `stormtrt` | Compare significant-pattern prevalence |
-| `storm2trt` | `storm2trt` | Compare spatial effect sizes |
-| `power_storm` | `power_storm` | Single-sample power analysis |
-| `powertrt` | `powertrt` | Treatment-versus-control power analysis |
-| `power2trt` | `power2trt` | Two-treatment power analysis |
-
 ## Installation
 
 The PyPI distribution name is `storm-omics`; the Python import
@@ -172,8 +161,8 @@ analyses in this environment.
 
 ### Treatment versus control
 
-`stormtrt` implements upstream STORM's one-sided pooled two-proportion test and
-uses the same default per-sample significance threshold of 0.05.
+`stormtrt` implements a one-sided pooled two-proportion test with a default
+per-sample significance threshold of 0.05.
 
 ```python
 import pandas as pd
