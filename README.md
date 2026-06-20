@@ -36,18 +36,10 @@ This repository provides a standalone Python package equivalent to
 The PyPI distribution name is `storm-omics`; the Python import
 is `storm_omics`. Python identifiers cannot contain hyphens. The shorter
 `storm` distribution name belongs to an unrelated
-Canonical ORM package. Until the first PyPI release, install from a source
-checkout:
+Canonical ORM package. Install STORM-OMICS from PyPI:
 
 ```bash
-python -m pip install .
-```
-
-For local development:
-
-```bash
-# Run from the root of a source checkout.
-python -m pip install -e .
+python -m pip install storm-omics
 ```
 
 ### GPU support
@@ -58,7 +50,7 @@ driver, and CUDA runtime using the
 install STORM:
 
 ```bash
-python -m pip install ".[gpu]"
+python -m pip install "storm-omics[gpu]"
 ```
 
 GPU execution is opt-in with `use_gpu=True`. If PyTorch or CUDA is not
