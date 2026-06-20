@@ -249,12 +249,6 @@ analyses in its
 directory. Those R and manuscript-specific scripts are not duplicated in this
 Python distribution.
 
-## License
-
-This Python distribution uses GNU General Public License v3.0. See
-[LICENSE](LICENSE). Upstream CastleLi/STORM is distributed under GPL version 2
-or later, which permits redistribution under GPLv3.
-
 ## Citation
 
 When using this implementation, cite the STORM method and the upstream
