@@ -34,7 +34,8 @@ The Python API maps all six upstream functions:
 ## Installation
 
 The PyPI distribution name is `storm-omics`; the Python import
-is `storm`. The shorter `storm` distribution name belongs to an unrelated
+is `storm_omics`. Python identifiers cannot contain hyphens. The shorter
+`storm` distribution name belongs to an unrelated
 Canonical ORM package. Until the first PyPI release, install from a source
 checkout:
 
@@ -71,13 +72,13 @@ columns. Coordinates must have shape `M x D`.
 
 ```python
 import pandas as pd
-import storm
+import storm_omics
 
 data = pd.read_csv("spatial_data.csv")
 coords = data[["x", "y", "z"]].to_numpy()
 expression = data.drop(columns=["x", "y", "z"])
 
-result = storm.storm(
+result = storm_omics.storm(
     coords,
     expression,
     k_nn=50,
@@ -106,7 +107,7 @@ p-value of 1 and effect size of 0.
 To use CUDA:
 
 ```python
-result_gpu = storm.storm(coords, expression, k_nn=50, use_gpu=True)
+result_gpu = storm_omics.storm(coords, expression, k_nn=50, use_gpu=True)
 ```
 
 On the CPU, sparse inputs remain sparse throughout each feature batch. CUDA
@@ -140,10 +141,10 @@ When several expression matrices share identical coordinates and neighbor
 count, prepare the graph once:
 
 ```python
-graph = storm.prepare_storm_graph(coords, k_nn=50)
+graph = storm_omics.prepare_storm_graph(coords, k_nn=50)
 
-result_a = storm.storm(coords, expression_a, graph=graph)
-result_b = storm.storm(coords, expression_b, graph=graph, use_gpu=True)
+result_a = storm_omics.storm(coords, expression_a, graph=graph)
+result_b = storm_omics.storm(coords, expression_b, graph=graph, use_gpu=True)
 ```
 
 `prepare_storm_graph` runs the same exact directed k-NN construction as the
@@ -165,14 +166,14 @@ uses the same default per-sample significance threshold of 0.05.
 
 ```python
 import pandas as pd
-import storm
+import storm_omics
 
 data = pd.DataFrame({
     "Group": ["Control"] * 4 + ["Treatment"] * 4,
     "Pvalue": [0.40, 0.20, 0.01, 0.30, 0.01, 0.02, 0.03, 0.20],
 })
 
-comparison = storm.stormtrt(data, control="Control", sig_level=0.05)
+comparison = storm_omics.stormtrt(data, control="Control", sig_level=0.05)
 ```
 
 ### Two treatment groups
@@ -185,7 +186,7 @@ data = pd.DataFrame({
     "K": [50] * 6,
 })
 
-comparison = storm.storm2trt(data, alternative="two.sided")
+comparison = storm_omics.storm2trt(data, alternative="two.sided")
 ```
 
 ## Power Analysis
@@ -193,15 +194,15 @@ comparison = storm.storm2trt(data, alternative="two.sided")
 Exactly one parameter described as unknown must be `None`.
 
 ```python
-import storm
+import storm_omics
 
 # Single-sample STORM: solve for number of spots.
-single = storm.power_storm(
+single = storm_omics.power_storm(
     es=0.06, n=None, power=0.80, sig_level=0.05
 )
 
 # Treatment versus control: solve for samples per control group.
-control = storm.powertrt(
+control = storm_omics.powertrt(
     nsample=None,
     power=0.90,
     sig_level=0.05,
@@ -211,7 +212,7 @@ control = storm.powertrt(
 )
 
 # Two treatments: solve for group-1 sample size.
-two_treatments = storm.power2trt(
+two_treatments = storm_omics.power2trt(
     delta=0.04,
     phi=4 / (50 * 3000),
     psi1=0.010,

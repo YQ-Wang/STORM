@@ -20,7 +20,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from storm.storm import (  # noqa: E402
+from storm_omics.storm import (  # noqa: E402
     gpu_backend,
     gpu_enabled,
     prepare_storm_graph,

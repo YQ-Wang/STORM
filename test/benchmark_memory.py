@@ -19,7 +19,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from storm.storm import gpu_enabled, storm
+from storm_omics.storm import gpu_enabled, storm
 
 COORD_JITTER_STD = 1e-3
 DEFAULT_CSV = os.path.join(os.path.dirname(__file__), "test_data", "scenario1_RW1_3-5_1")

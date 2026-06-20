@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix, issparse
 
-from storm.storm import (
+from storm_omics.storm import (
     StormGraph,
     gpu_enabled,
     power2trt,
