@@ -278,15 +278,20 @@ def storm(
                 warnings.filterwarnings(
                     "ignore", message="Sparse CSR tensor support is in beta state"
                 )
+                patches_centered_raw = _centered_patches(patches_raw, n_spots, k_nn)
                 patches_gpu = torch.sparse_csr_tensor(
                     torch.from_numpy(
-                        np.array(patches_raw.indptr, dtype=np.int64, copy=True)
+                        np.array(
+                            patches_centered_raw.indptr, dtype=np.int64, copy=True
+                        )
                     ).cuda(),
                     torch.from_numpy(
-                        np.array(patches_raw.indices, dtype=np.int64, copy=True)
+                        np.array(
+                            patches_centered_raw.indices, dtype=np.int64, copy=True
+                        )
                     ).cuda(),
-                    torch.from_numpy(patches_raw.data.copy()).cuda(),
-                    size=patches_raw.shape,
+                    torch.from_numpy(patches_centered_raw.data.copy()).cuda(),
+                    size=patches_centered_raw.shape,
                     device="cuda",
                 )
             batch_size = _gpu_batch_size(n_spots, n_genes)
@@ -300,7 +305,6 @@ def storm(
                     _dense_batch(start_idx, end_idx)
                 ).cuda()
                 diff_ik = torch.sparse.mm(patches_gpu, exp_batch_gpu)
-                diff_ik.sub_(k_nn * exp_batch_gpu)
                 ft_s2 = _gpu_column_sum_float64(diff_ik.square_())
                 ft_mean = _gpu_column_sum_float64(exp_batch_gpu) / n_spots
                 ft_var = (
@@ -326,8 +330,6 @@ def storm(
             )
 
     if not gpu_succeeded:
-        # Fold the centroid term into the neighbor matrix so each batch needs a
-        # single sparse matmul (upstream's PatchesCells %*% ExpMat).
         patches_centered = _centered_patches(patches_raw, n_spots, k_nn)
         batch_size = max(1, 5_000_000 // n_spots)
         ft_tscores_list = []

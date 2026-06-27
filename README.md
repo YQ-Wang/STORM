@@ -110,22 +110,23 @@ CPU/GPU agreement without full-size float64 GPU copies.
 
 ### Reference performance
 
-Measured June 19, 2026 with Python 3.13, PyTorch 2.10.0, CUDA 12.8, an NVIDIA
+Measured June 26, 2026 with Python 3.13, PyTorch 2.10.0, CUDA 12.8, an NVIDIA
 GeForce RTX 5070 Ti (15.9 GB), `k_nn=50`, `approx=True`, and the included real
 2,308-spot by 10,000-feature dataset tiled with small coordinate jitter:
 
 | Copies | Spots | CPU | GPU | Speedup | CPU-run peak | GPU-run host peak | GPU peak VRAM |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1x | 2,308 | 0.243 s | 0.092 s | 2.64x | 185 MB | 156 MB | 193 MB |
-| 2x | 4,616 | 0.476 s | 0.160 s | 2.97x | 265 MB | 248 MB | 259 MB |
-| 3x | 6,924 | 0.717 s | 0.232 s | 3.09x | 357 MB | 340 MB | 260 MB |
-| 4x | 9,232 | 0.903 s | 0.298 s | 3.03x | 449 MB | 440 MB | 262 MB |
+| 1x | 2,308 | 0.197 s | 0.091 s | 2.17x | 164 MB | 154 MB | 193 MB |
+| 2x | 4,616 | 0.393 s | 0.156 s | 2.51x | 242 MB | 244 MB | 259 MB |
+| 3x | 6,924 | 0.584 s | 0.238 s | 2.46x | 335 MB | 334 MB | 260 MB |
+| 4x | 9,232 | 0.759 s | 0.285 s | 2.66x | 445 MB | 440 MB | 262 MB |
 
 All four CPU/GPU comparisons had identical `p < 0.05` calls and maximum
-p-value differences below `4.5e-5`. Host peak allocations are measured inside
-`storm` and exclude the already-loaded input DataFrame and interpreter. GPU
-memory is PyTorch peak allocated VRAM. Timings are median of three; memory-mode
-timings include tracing overhead and are therefore not shown here.
+p-value and effect-size differences below `5e-5`. Host peak allocations are
+measured inside `storm` and exclude the already-loaded input DataFrame and
+interpreter. GPU memory is PyTorch peak allocated VRAM. Timings are median of
+five; memory-mode timings include tracing overhead and are therefore not shown
+here.
 
 ### Reusing the exact neighbor graph
 
@@ -144,10 +145,10 @@ ordinary call. The graph is immutable, `storm` verifies that its coordinates
 and neighbor count match, and exact-mode's graph-only scaling constant is
 cached lazily. Reuse therefore changes only setup cost, not any statistic.
 
-On the 4x real dataset, median repeated-call time decreased from 0.925 s to
-0.871 s on CPU and from 0.360 s to 0.231 s on GPU. Cold graph preparation took
-0.198 s, so it paid for itself after about four CPU analyses or two GPU
-analyses in this environment.
+On the 4x real dataset, median repeated-call time decreased from 0.759 s to
+0.702 s on CPU and from 0.285 s to 0.230 s on GPU. Cold graph preparation took
+about 0.2 s, so it paid for itself after roughly four analyses on either path
+in this environment.
 
 ## Group Comparisons
 
@@ -223,7 +224,7 @@ using them as study sizes.
 
 ```bash
 python -m pytest
-python test/benchmark_cpu_gpu.py --multipliers 1 2 3 4 --reps 3
+python test/benchmark_cpu_gpu.py --multipliers 1 2 3 4 --reps 5
 python test/benchmark_cpu_gpu.py --multipliers 4 --reps 5 --reuse-graph
 python test/benchmark_memory.py --multipliers 1 2 3 4
 ```
