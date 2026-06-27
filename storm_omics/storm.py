@@ -11,7 +11,12 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd  # type: ignore
-from scipy.sparse import csr_matrix, isspmatrix_csr, issparse  # type: ignore
+from scipy.sparse import (  # type: ignore
+    csr_matrix,
+    identity,
+    isspmatrix_csr,
+    issparse,
+)
 from scipy.stats import norm  # type: ignore
 
 gpu_enabled = True
@@ -116,15 +121,33 @@ def _exact_test_constant(patches_raw: csr_matrix, n_spots: int, k_nn: int) -> fl
     patches_raw_t = patches_raw.T.tocsr()
     w_mat_n1 = patches_raw @ patches_raw_t
     w_n2 = float(w_mat_n1.multiply(w_mat_n1).sum()) - n_spots * k_nn**2
-    rows, cols = patches_raw.nonzero()
-    w_n3 = float(np.asarray(w_mat_n1[rows, cols]).sum())
-    w_n4 = float(np.asarray(patches_raw_t[rows, cols]).sum())
+    # w_n3/w_n4 sum w_mat_n1 and patches_raw_t over the support of patches_raw.
+    # Masking with an elementwise product is mathematically identical to upstream's
+    # ``w_mat_n1[PatchesCells_Raw > 0]`` while avoiding slow CSR fancy indexing and
+    # the large intermediate index arrays it allocates.
+    w_n3 = float(w_mat_n1.multiply(patches_raw).sum())
+    w_n4 = float(patches_raw.multiply(patches_raw_t).sum())
     denominator = 4 * k_nn**3 + (
         2 * w_n2 - 8 * k_nn * w_n3 + 4 * k_nn**2 * w_n4
     ) / n_spots
     return float(
         np.sqrt(n_spots * k_nn**2 * (k_nn + 1) ** 2 / denominator)
     )
+
+
+def _centered_patches(patches_raw: csr_matrix, n_spots: int, k_nn: int) -> csr_matrix:
+    """Return upstream's ``PatchesCells = PatchesCells_Raw - K_NN * Diagonal``.
+
+    Folding the centroid term into the neighbor matrix lets each feature batch use
+    a single sparse matmul instead of a separate scaled subtraction. The identity is
+    built with ``patches_raw``'s dtype so the result stays float32 rather than
+    being upcast to float64.
+    """
+    centered = patches_raw - k_nn * identity(
+        n_spots, dtype=patches_raw.dtype, format="csr"
+    )
+    centered.sort_indices()
+    return centered
 
 
 def _gpu_batch_size(n_spots: int, n_genes: int) -> int:
@@ -303,6 +326,9 @@ def storm(
             )
 
     if not gpu_succeeded:
+        # Fold the centroid term into the neighbor matrix so each batch needs a
+        # single sparse matmul (upstream's PatchesCells %*% ExpMat).
+        patches_centered = _centered_patches(patches_raw, n_spots, k_nn)
         batch_size = max(1, 5_000_000 // n_spots)
         ft_tscores_list = []
         effect_size_list = []
@@ -312,7 +338,7 @@ def storm(
             end_idx = min(start_idx + batch_size, n_genes)
             if exp_mat_sparse is not None:
                 exp_batch = exp_mat_sparse[:, start_idx:end_idx]
-                diff_ik = patches_raw @ exp_batch - k_nn * exp_batch
+                diff_ik = patches_centered @ exp_batch
                 diff_ik.data **= 2
                 ft_s2 = np.asarray(
                     diff_ik.sum(axis=0, dtype=np.float64)
@@ -329,8 +355,12 @@ def storm(
                     - ft_mean**2
                 )
             else:
-                exp_batch = exp_mat_array[:, start_idx:end_idx]
-                diff_ik = patches_raw @ exp_batch - k_nn * exp_batch
+                # A contiguous batch lets the sparse matmul skip an internal copy
+                # and speeds up the column reductions below.
+                exp_batch = np.ascontiguousarray(
+                    exp_mat_array[:, start_idx:end_idx]
+                )
+                diff_ik = patches_centered @ exp_batch
                 np.square(diff_ik, out=diff_ik)
                 ft_s2 = diff_ik.sum(axis=0, dtype=np.float64)
                 ft_mean = exp_batch.mean(axis=0, dtype=np.float64)
