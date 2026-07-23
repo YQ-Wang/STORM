@@ -3,7 +3,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix, issparse
+from scipy.sparse import csr_matrix, identity, issparse
+from scipy.stats import norm
 
 from storm_omics.storm import (
     StormGraph,
@@ -16,6 +17,50 @@ from storm_omics.storm import (
     storm2trt,
     stormtrt,
 )
+
+
+def _upstream_storm_reference(coords, exp_mat, k_nn, approx=True):
+    """Evaluate CastleLi/STORM's published formulas in float64."""
+    n_spots = len(coords)
+    graph = prepare_storm_graph(coords, k_nn=k_nn)
+    patches_raw = graph.patches_raw.astype(np.float64)
+    patches = patches_raw - k_nn * identity(
+        n_spots, dtype=np.float64, format="csr"
+    )
+    exp_mat = np.asarray(exp_mat, dtype=np.float64)
+    diff_ik = patches @ exp_mat
+    ft_s2 = np.square(diff_ik).sum(axis=0, dtype=np.float64)
+    ft_mean = exp_mat.mean(axis=0, dtype=np.float64)
+    ft_var = np.square(exp_mat).mean(axis=0, dtype=np.float64) - ft_mean**2
+    ft_s0 = n_spots * k_nn * (k_nn + 1) * ft_var
+
+    if approx:
+        scale = np.sqrt(k_nn * n_spots / 4)
+    else:
+        patches_raw_t = patches_raw.T.tocsr()
+        w_mat_n1 = patches_raw @ patches_raw_t
+        w_n2 = (
+            w_mat_n1.multiply(w_mat_n1).sum(dtype=np.float64)
+            - n_spots * k_nn**2
+        )
+        w_n3 = w_mat_n1.multiply(patches_raw).sum(dtype=np.float64)
+        w_n4 = patches_raw.multiply(patches_raw_t).sum(dtype=np.float64)
+        scale = np.sqrt(
+            n_spots * k_nn**2 * (k_nn + 1) ** 2
+            / (
+                4 * k_nn**3
+                + (
+                    2 * w_n2
+                    - 8 * k_nn * w_n3
+                    + 4 * k_nn**2 * w_n4
+                )
+                / n_spots
+            )
+        )
+
+    ratio = ft_s2 / ft_s0
+    scores = (ratio - 1) * scale
+    return 2 * norm.sf(np.abs(scores)), 1 - ratio
 
 
 class TestStorm(unittest.TestCase):
@@ -138,6 +183,70 @@ class TestStorm(unittest.TestCase):
         self.assertEqual(len(result_exact), 5)
         self.assertTrue(all(0 <= p <= 1 for p in result_approx['p_values']))
         self.assertTrue(all(0 <= p <= 1 for p in result_exact['p_values']))
+
+    def test_storm_matches_upstream_exact_formula(self):
+        rng = np.random.default_rng(2026)
+        coords = rng.normal(size=(120, 3))
+        exp_mat = rng.lognormal(size=(120, 8))
+        expected_p, expected_effect = _upstream_storm_reference(
+            coords, exp_mat, k_nn=10, approx=False
+        )
+
+        result = storm(coords, exp_mat, k_nn=10, approx=False)
+
+        np.testing.assert_allclose(
+            result["p_values"], expected_p, rtol=0, atol=1e-5
+        )
+        np.testing.assert_allclose(
+            result["effect_size"], expected_effect, rtol=0, atol=5e-7
+        )
+
+    def test_storm_repairs_float32_variance_cancellation(self):
+        rng = np.random.default_rng(7)
+        coords = rng.normal(size=(300, 3))
+        exp_mat = 10_000 + rng.normal(size=(300, 100))
+        expected_p, expected_effect = _upstream_storm_reference(
+            coords, exp_mat, k_nn=20
+        )
+
+        for values in (exp_mat, csr_matrix(exp_mat)):
+            with self.subTest(sparse=issparse(values)):
+                result = storm(coords, values, k_nn=20, use_gpu=False)
+
+                np.testing.assert_array_equal(
+                    result["p_values"].to_numpy() < 0.05,
+                    expected_p < 0.05,
+                )
+                np.testing.assert_allclose(
+                    result["p_values"], expected_p, rtol=0, atol=2e-3
+                )
+                np.testing.assert_allclose(
+                    result["effect_size"],
+                    expected_effect,
+                    rtol=0,
+                    atol=7e-5,
+                )
+
+    @unittest.skipUnless(gpu_enabled, "CUDA is not available")
+    def test_storm_gpu_repairs_float32_variance_cancellation(self):
+        rng = np.random.default_rng(7)
+        coords = rng.normal(size=(300, 3))
+        exp_mat = 10_000 + rng.normal(size=(300, 100))
+        expected_p, expected_effect = _upstream_storm_reference(
+            coords, exp_mat, k_nn=20
+        )
+
+        result = storm(coords, exp_mat, k_nn=20, use_gpu=True)
+
+        np.testing.assert_array_equal(
+            result["p_values"].to_numpy() < 0.05, expected_p < 0.05
+        )
+        np.testing.assert_allclose(
+            result["p_values"], expected_p, rtol=0, atol=6e-3
+        )
+        np.testing.assert_allclose(
+            result["effect_size"], expected_effect, rtol=0, atol=2e-4
+        )
 
     @unittest.skipUnless(gpu_enabled, "CUDA is not available")
     def test_storm_exact_gpu_equivalence(self):

@@ -21,6 +21,7 @@ from scipy.stats import norm  # type: ignore
 
 gpu_enabled = True
 gpu_backend = "torch"
+_FLOAT32_VARIANCE_RISK = 32 * np.finfo(np.float32).eps
 
 try:
     import torch  # type: ignore
@@ -120,13 +121,16 @@ def _exact_test_constant(patches_raw: csr_matrix, n_spots: int, k_nn: int) -> fl
     """Return the finite-sample scaling constant used by upstream STORM."""
     patches_raw_t = patches_raw.T.tocsr()
     w_mat_n1 = patches_raw @ patches_raw_t
-    w_n2 = float(w_mat_n1.multiply(w_mat_n1).sum()) - n_spots * k_nn**2
+    w_n2 = (
+        float(w_mat_n1.multiply(w_mat_n1).sum(dtype=np.float64))
+        - n_spots * k_nn**2
+    )
     # w_n3/w_n4 sum w_mat_n1 and patches_raw_t over the support of patches_raw.
     # Masking with an elementwise product is mathematically identical to upstream's
     # ``w_mat_n1[PatchesCells_Raw > 0]`` while avoiding slow CSR fancy indexing and
     # the large intermediate index arrays it allocates.
-    w_n3 = float(w_mat_n1.multiply(patches_raw).sum())
-    w_n4 = float(patches_raw.multiply(patches_raw_t).sum())
+    w_n3 = float(w_mat_n1.multiply(patches_raw).sum(dtype=np.float64))
+    w_n4 = float(patches_raw.multiply(patches_raw_t).sum(dtype=np.float64))
     denominator = 4 * k_nn**3 + (
         2 * w_n2 - 8 * k_nn * w_n3 + 4 * k_nn**2 * w_n4
     ) / n_spots
@@ -169,6 +173,40 @@ def _gpu_column_sum_float64(values) -> "torch.Tensor":
         partial = values[start:start + 512].sum(dim=0)
         total.add_(partial.to(dtype=torch.float64))
     return total
+
+
+def _repair_cancellation_prone_variance(
+    values: Union[np.ndarray, csr_matrix],
+    means: np.ndarray,
+    second_moment: np.ndarray,
+    variance: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """Recompute only variances at risk of float32 cancellation.
+
+    Upstream STORM uses ``E[X^2] - E[X]^2``. This function keeps that fast
+    calculation for ordinary columns and uses its algebraically equivalent
+    centered form only when float32 rounding can dominate the result. It also
+    returns the centered float64 values so callers can repair S2 for the same
+    rare columns without another conversion.
+    """
+    scale = np.maximum(np.abs(second_moment), means**2)
+    unstable = (
+        (second_moment > 0)
+        & (variance <= _FLOAT32_VARIANCE_RISK * scale)
+    )
+    if not np.any(unstable):
+        return variance, unstable, None
+
+    if issparse(values):
+        centered = values[:, unstable].toarray().astype(np.float64, copy=False)
+    else:
+        centered = np.asarray(values[:, unstable], dtype=np.float64)
+    centered -= means[unstable]
+    variance[unstable] = (
+        np.einsum("ij,ij->j", centered, centered, optimize=True)
+        / values.shape[0]
+    )
+    return variance, unstable, centered
 
 
 def storm(
@@ -307,9 +345,11 @@ def storm(
                 diff_ik = torch.sparse.mm(patches_gpu, exp_batch_gpu)
                 ft_s2 = _gpu_column_sum_float64(diff_ik.square_())
                 ft_mean = _gpu_column_sum_float64(exp_batch_gpu) / n_spots
+                # Centering is algebraically identical to E[X^2] - E[X]^2 and
+                # avoids float32 cancellation without a full float64 matrix.
+                exp_batch_gpu.sub_(ft_mean.to(dtype=exp_batch_gpu.dtype))
                 ft_var = (
                     _gpu_column_sum_float64(exp_batch_gpu.square_()) / n_spots
-                    - ft_mean.square_()
                 )
                 ft_s0 = n_spots * k_nn * (k_nn + 1) * ft_var
                 ratio = torch.where(
@@ -335,6 +375,7 @@ def storm(
         ft_tscores_list = []
         effect_size_list = []
         scale = np.sqrt(k_nn * n_spots / 4) if approx else test_const
+        patches_centered_float64 = None
 
         for start_idx in range(0, n_genes, batch_size):
             end_idx = min(start_idx + batch_size, n_genes)
@@ -350,11 +391,14 @@ def storm(
                 ).ravel()
                 exp_batch_sq = exp_batch.copy()
                 exp_batch_sq.data **= 2
-                ft_var = (
-                    np.asarray(
-                        exp_batch_sq.mean(axis=0, dtype=np.float64)
-                    ).ravel()
-                    - ft_mean**2
+                second_moment = np.asarray(
+                    exp_batch_sq.mean(axis=0, dtype=np.float64)
+                ).ravel()
+                ft_var, unstable, centered = _repair_cancellation_prone_variance(
+                    exp_batch,
+                    ft_mean,
+                    second_moment,
+                    second_moment - ft_mean**2,
                 )
             else:
                 # A contiguous batch lets the sparse matmul skip an internal copy
@@ -368,9 +412,22 @@ def storm(
                 ft_mean = exp_batch.mean(axis=0, dtype=np.float64)
                 # Reuse the dense difference buffer for the second moment.
                 np.square(exp_batch, out=diff_ik)
-                ft_var = (
+                second_moment = (
                     diff_ik.sum(axis=0, dtype=np.float64) / n_spots
-                    - ft_mean**2
+                )
+                ft_var, unstable, centered = _repair_cancellation_prone_variance(
+                    exp_batch,
+                    ft_mean,
+                    second_moment,
+                    second_moment - ft_mean**2,
+                )
+
+            if centered is not None:
+                if patches_centered_float64 is None:
+                    patches_centered_float64 = patches_centered.astype(np.float64)
+                stable_diff = patches_centered_float64 @ centered
+                ft_s2[unstable] = np.square(stable_diff).sum(
+                    axis=0, dtype=np.float64
                 )
 
             ft_s0 = n_spots * k_nn * (k_nn + 1) * np.maximum(ft_var, 0)

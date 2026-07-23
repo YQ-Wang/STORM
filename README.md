@@ -106,7 +106,10 @@ On the CPU, sparse inputs remain sparse throughout each feature batch. CUDA
 uses a sparse neighbor graph but transfers dense feature batches, with the
 batch size chosen from currently available VRAM. Large matrices remain
 float32; column reductions use bounded partial sums accumulated in float64 for
-CPU/GPU agreement without full-size float64 GPU copies.
+CPU/GPU agreement without full-size float64 GPU copies. Columns at risk of
+float32 variance cancellation are detected automatically on CPU and recomputed
+in float64; CUDA uses the same algebraically equivalent centered variance with
+float64 reductions.
 
 ### Reference performance
 

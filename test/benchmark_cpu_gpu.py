@@ -33,6 +33,7 @@ N_REPS = 2
 STORM_K_NN = 50
 _P_VALUE_ATOL = 1e-3
 _EFFECT_SIZE_ATOL = 1e-5
+_GPU_FALLBACK_PREFIX = "GPU computation failed; using CPU instead:"
 
 
 def build_dataset(df_base: pd.DataFrame, multiplier: int, rng: np.random.Generator):
@@ -60,21 +61,51 @@ def build_dataset(df_base: pd.DataFrame, multiplier: int, rng: np.random.Generat
     return np.vstack(tiles_coords), pd.concat(tiles_exp, ignore_index=True)
 
 
-def _time_call(fn, *args, warmup: bool = False, **kwargs) -> Optional[float]:
+def _run_call(fn, *args, reject_gpu_fallback: bool = False, **kwargs):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always" if reject_gpu_fallback else "ignore")
+        result = fn(*args, **kwargs)
+    if reject_gpu_fallback:
+        fallback = next(
+            (
+                str(item.message)
+                for item in caught
+                if str(item.message).startswith(_GPU_FALLBACK_PREFIX)
+            ),
+            None,
+        )
+        if fallback is not None:
+            raise RuntimeError(fallback)
+    return result
+
+
+def _time_call(
+    fn,
+    *args,
+    warmup: bool = False,
+    reject_gpu_fallback: bool = False,
+    **kwargs,
+) -> Optional[float]:
     if warmup:
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                fn(*args, **kwargs)
+            _run_call(
+                fn,
+                *args,
+                reject_gpu_fallback=reject_gpu_fallback,
+                **kwargs,
+            )
         except Exception:
             pass
 
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            t0 = time.perf_counter()
-            fn(*args, **kwargs)
-            return time.perf_counter() - t0
+        t0 = time.perf_counter()
+        _run_call(
+            fn,
+            *args,
+            reject_gpu_fallback=reject_gpu_fallback,
+            **kwargs,
+        )
+        return time.perf_counter() - t0
     except Exception as e:
         print(f"      ERROR: {e}")
         return None
@@ -154,29 +185,36 @@ def benchmark_storm(
                 approx=True,
                 use_gpu=True,
                 warmup=True,
+                reject_gpu_fallback=True,
                 **storm_kwargs,
             )
             try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    gpu_result = storm(
-                        coords, exp_df, approx=True, use_gpu=True, **storm_kwargs
-                    )
-            except Exception as e:
-                print(f"      GPU result ERROR: {e}")
-
-            gpu_times = []
-            for _ in range(N_REPS):
-                t = _time_call(
+                gpu_result = _run_call(
                     storm,
                     coords,
                     exp_df,
                     approx=True,
                     use_gpu=True,
+                    reject_gpu_fallback=True,
                     **storm_kwargs,
                 )
-                if t is not None:
-                    gpu_times.append(t)
+            except Exception as e:
+                print(f"      GPU result ERROR: {e}")
+
+            gpu_times = []
+            if gpu_result is not None:
+                for _ in range(N_REPS):
+                    t = _time_call(
+                        storm,
+                        coords,
+                        exp_df,
+                        approx=True,
+                        use_gpu=True,
+                        reject_gpu_fallback=True,
+                        **storm_kwargs,
+                    )
+                    if t is not None:
+                        gpu_times.append(t)
             gpu_best = float(np.median(gpu_times)) if gpu_times else None
 
         cons = None
